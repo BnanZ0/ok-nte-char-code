@@ -39,6 +39,13 @@ jobs:
     needs: validate
     runs-on: windows-latest
     steps:
+      - name: Configure runner
+        run: |
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+          git config --global user.email "110257560+BnanZ0@users.noreply.github.com"
+          git config --global user.name "ok-nte catalog bot"
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -56,6 +63,21 @@ jobs:
           git add teams.json
           git commit -m "chore: update community catalog [skip ci]"
           git push
+      - name: Initialize empty CNB repository
+        env:
+          CNB_GH: ${{ secrets.CNB_GH }}
+        run: |
+          $target = Join-Path $env:RUNNER_TEMP "ok-nte-char-code-cnb-bootstrap"
+          git clone "https://cnb:$env:CNB_GH@cnb.cool/BnanZ0/ok-nte-char-code.git" $target
+          git -C $target rev-parse --verify HEAD 2>$null
+          if ($LASTEXITCODE -eq 0) { exit 0 }
+          git -C $target checkout --orphan main
+          New-Item -ItemType Directory -Force -Path (Join-Path $target "codes") | Out-Null
+          New-Item -ItemType File -Force -Path (Join-Path $target "codes/.gitkeep") | Out-Null
+          Set-Content -NoNewline -Encoding utf8 (Join-Path $target "teams.json") "{`n  `"format_version`": 1,`n  `"packages`": []`n}`n"
+          git -C $target add codes/.gitkeep teams.json
+          git -C $target commit -m "chore: initialize community catalog"
+          git -C $target push origin main
       - name: Synchronize CNB repository
         id: sync
         uses: ok-oldking/partial-sync-repo@bbd55c1dffbcc1292a12295d949e7807b35ea93e
