@@ -1,4 +1,28 @@
 {
   "format_version": 1,
-  "packages": []
+  "packages": [
+    {
+      "archive": "codes/Zankou_ru_1.0.0.zip",
+      "filename": "Zankou_ru_1.0.0.zip",
+      "size": 1237,
+      "updated_at": "2026-08-26T02:20:36+08:00",
+      "format_version": 1,
+      "name": "test2",
+      "description": "test test",
+      "author": "ru",
+      "version": "1.0.0",
+      "slots": [
+        {
+          "index": 0,
+          "kind": "external",
+          "file": "zankou - 複製.py",
+          "class_name": "Zankou",
+          "display": {
+            "zh_CN": "残红",
+            "en_US": "Zankou"
+          }
+        }
+      ]
+    }
+  ]
 }
