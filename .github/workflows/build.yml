@@ -1,0 +1,64 @@
+name: Build community catalog
+
+on:
+  pull_request:
+    paths:
+      - "codes/**"
+      - "scripts/build_catalog.py"
+      - ".github/workflows/build.yml"
+  push:
+    branches: [main]
+    paths:
+      - "codes/**"
+      - "scripts/build_catalog.py"
+      - ".github/workflows/build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Validate packages
+        run: python scripts/build_catalog.py --check
+      - name: Test catalog builder
+        run: python -m unittest discover -s tests -p "test_*.py"
+
+  publish:
+    if: github.event_name != 'pull_request'
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Build teams.json
+        run: python scripts/build_catalog.py
+      - name: Commit generated catalog
+        run: |
+          if git diff --quiet -- teams.json; then
+            exit 0
+          fi
+          git config user.name "ok-nte catalog bot"
+          git config user.email "110257560+BnanZ0@users.noreply.github.com"
+          git add teams.json
+          git commit -m "chore: update community catalog [skip ci]"
+          git push
+      - name: Synchronize CNB repository
+        uses: ok-oldking/partial-sync-repo@bbd55c1dffbcc1292a12295d949e7807b35ea93e
+        with:
+          repos: |
+            https://cnb:${{ secrets.CNB_GH }}@cnb.cool/BnanZ0/ok-nte-char-code.git
+          sync_list: deploy.txt
+          tag: main
+          gitignore_file: .update_repo_gitignore
+          show_author: true
