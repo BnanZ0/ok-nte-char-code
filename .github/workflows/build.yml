@@ -15,7 +15,11 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: community-catalog-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 defaults:
   run:
@@ -23,6 +27,8 @@ defaults:
 
 jobs:
   validate:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -37,6 +43,8 @@ jobs:
   publish:
     if: github.event_name != 'pull_request'
     needs: validate
+    permissions:
+      contents: write
     runs-on: windows-latest
     steps:
       - name: Configure runner

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+from contextlib import redirect_stderr
+from io import StringIO
 import json
+from pathlib import Path
+import stat
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
-from pathlib import Path
 
-from scripts.build_catalog import ValidationError, build_catalog, read_archive
+from scripts.build_catalog import ValidationError, build_catalog, main, read_archive
 
 
 def manifest(*, author: str = "Alice", version: str = "1.0.0") -> dict:
@@ -89,6 +93,52 @@ class BuildCatalogTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValidationError, "syntax"):
             read_archive(archive_path)
+
+    def test_valid_source_is_not_executed_during_validation(self) -> None:
+        archive_path = self.root / "codes" / "safe.zip"
+        with zipfile.ZipFile(archive_path, "w") as archive:
+            archive.writestr("team.json", json.dumps(manifest()))
+            archive.writestr("hotori.py", "raise RuntimeError('must not execute')\n")
+
+        self.assertEqual(read_archive(archive_path)["name"], "Zero Hotori")
+
+    def test_rejects_directory_entries_symbolic_links_and_invalid_class_names(self) -> None:
+        directory_archive = self.root / "codes" / "directory.zip"
+        with zipfile.ZipFile(directory_archive, "w") as archive:
+            archive.writestr("folder/", "")
+            archive.writestr("team.json", json.dumps(manifest()))
+            archive.writestr("hotori.py", "class Hotori:\n    pass\n")
+        with self.assertRaisesRegex(ValidationError, "directory"):
+            read_archive(directory_archive)
+
+        link_archive = self.root / "codes" / "link.zip"
+        link = zipfile.ZipInfo("hotori.py")
+        link.external_attr = (stat.S_IFLNK | 0o777) << 16
+        with zipfile.ZipFile(link_archive, "w") as archive:
+            archive.writestr("team.json", json.dumps(manifest()))
+            archive.writestr(link, "hotori.py")
+        with self.assertRaisesRegex(ValidationError, "symbolic"):
+            read_archive(link_archive)
+
+        invalid_class_archive = self.root / "codes" / "class.zip"
+        invalid_manifest = manifest()
+        invalid_manifest["slots"][1]["class_name"] = "not a class"
+        write_archive(invalid_class_archive, invalid_manifest)
+        with self.assertRaisesRegex(ValidationError, "identifier"):
+            read_archive(invalid_class_archive)
+
+    def test_rejects_duplicate_team_author_and_version(self) -> None:
+        write_archive(self.root / "codes" / "first.zip")
+        write_archive(self.root / "codes" / "second.zip")
+
+        with self.assertRaisesRegex(ValidationError, "duplicate"):
+            build_catalog(self.root)
+
+    def test_catalog_size_limit_fails_check(self) -> None:
+        write_archive(self.root / "codes" / "zero.zip")
+        with patch("scripts.build_catalog.MAX_CATALOG_BYTES", 1):
+            with redirect_stderr(StringIO()):
+                self.assertEqual(main(["--check", "--root", str(self.root)]), 1)
 
 
 if __name__ == "__main__":
