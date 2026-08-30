@@ -44,6 +44,19 @@ an existing external-code directory or local team; use a distinct directory for 
 The package uses only OK-NTE's public character and planner APIs and contains no databases,
 feature files, or extra assets.
 
+## Third submission: Zankou–Lacrimosa Dual-Core Community Edition
+
+The third community submission is `Zankou–Lacrimosa Dual-Core Community Edition 1.0.0`, using
+Zankou, Lacrimosa, Sakiri, and Adler:
+
+- Zankou holds heavy attack to light the gold E, casts purple E, then uses two Q casts.
+- Lacrimosa takes the field for a complete Q/E sequence and a short normal-attack window.
+- After Lacrimosa, Adler prioritizes a shield, Sakiri uses Q/E for a short buff setup, and the
+  rotation returns to Zankou.
+
+The two cores alternate field time while the supports only enter for the handoff buffs and shield.
+The package uses public character and planner APIs; built-in characters remain OK-NTE defaults.
+
 ## Export and submit a package
 
 ### 1. Export from OK-NTE
