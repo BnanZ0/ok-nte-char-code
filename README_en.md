@@ -32,6 +32,31 @@ an existing external-code directory or local team; use a distinct directory for 
 > code to run the character logic. Import only packages from trusted authors or sources you have
 > reviewed yourself.
 
+## Included example: Zankou Disarray Community Edition
+
+`Zankou Disarray Community Edition 1.0.1` uses Zankou, Daffodill, Iroi, and Adler:
+
+- Daffodill charges the first Q with heavy attacks and casts it as soon as it is ready.
+- Adler prioritizes a shield; Iroi uses E/Q for healing and buffs, then leaves the field.
+- Zankou holds heavy attack to light the gold E, casts purple E, and follows with two Q casts
+  before repeating the short support handoff.
+
+The package uses only OK-NTE's public character and planner APIs and contains no databases,
+feature files, or extra assets.
+
+## Third submission: Zankou–Lacrimosa Dual-Core Community Edition
+
+The third community submission is `Zankou–Lacrimosa Dual-Core Community Edition 1.0.0`, using
+Zankou, Lacrimosa, Sakiri, and Adler:
+
+- Zankou holds heavy attack to light the gold E, casts purple E, then uses two Q casts.
+- Lacrimosa takes the field for a complete Q/E sequence and a short normal-attack window.
+- After Lacrimosa, Adler prioritizes a shield, Sakiri uses Q/E for a short buff setup, and the
+  rotation returns to Zankou.
+
+The two cores alternate field time while the supports only enter for the handoff buffs and shield.
+The package uses public character and planner APIs; built-in characters remain OK-NTE defaults.
+
 ## Export and submit a package
 
 ### 1. Export from OK-NTE
