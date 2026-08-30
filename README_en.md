@@ -32,6 +32,18 @@ an existing external-code directory or local team; use a distinct directory for 
 > code to run the character logic. Import only packages from trusted authors or sources you have
 > reviewed yourself.
 
+## Included example: Zankou Disarray Community Edition
+
+`Zankou Disarray Community Edition 1.0.1` uses Zankou, Daffodill, Iroi, and Adler:
+
+- Daffodill charges the first Q with heavy attacks and casts it as soon as it is ready.
+- Adler prioritizes a shield; Iroi uses E/Q for healing and buffs, then leaves the field.
+- Zankou holds heavy attack to light the gold E, casts purple E, and follows with two Q casts
+  before repeating the short support handoff.
+
+The package uses only OK-NTE's public character and planner APIs and contains no databases,
+feature files, or extra assets.
+
 ## Export and submit a package
 
 ### 1. Export from OK-NTE
