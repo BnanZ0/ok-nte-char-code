@@ -20,8 +20,12 @@ requests. After a merge, GitHub Actions validates the packages, rebuilds the cat
 
 1. Open **Team Management** in OK-NTE.
 2. Select **Workshop** and search by package name, character, or author.
-3. Select a package and import it. Review its metadata, then choose a local team name and external
-   code directory.
+3. Each package defaults to its highest version. Use the version selector in the details panel to
+   inspect an older version's description and members.
+4. Click Import, review the ZIP metadata, then choose a local team name and external code directory.
+
+The character filter shows names in the interface language; keyword search supports both Chinese
+and English. Search and filters use the latest version's metadata for each package.
 
 You can also use **Import** to select a local ZIP obtained elsewhere. Importing never overwrites
 an existing external-code directory or local team; use a distinct directory for every version.
@@ -45,6 +49,8 @@ the combat logic. The exported filename is:
 ```
 
 The filename is for readability only. The `team.json` inside the archive is authoritative.
+If different strategies produce the same ZIP filename, include the package name in the filename
+before saving or uploading. The files inside the archive do not need to change.
 
 ### 2. Create a pull request in GitHub's web UI
 
@@ -55,8 +61,21 @@ The filename is for readability only. The `team.json` inside the archive is auth
 4. Create the pull request and wait for validation and maintainer review.
 
 Do not edit `teams.json` directly. The publish workflow generates it after a PR is merged and
-updates both GitHub and the CNB mirror. Different authors or versions of the same team remain
-separate catalog entries.
+updates both GitHub and the CNB mirror. The catalog retains every version. The Workshop groups
+packages by author and package name, displaying one row per group.
+
+### Package identity and versions
+
+- Author and package name identify a package. Keep both unchanged when publishing an update;
+  change only the version, description, or code.
+- Use different package names for different strategies, even for the same team. Changing the author
+  or package name creates a separate package.
+- Versions must contain three non-negative integers, such as `1.0.0`, `1.9.0`, or `1.10.0`.
+  Leading zeros are not allowed except for `0` itself. No `v` prefix, prerelease suffix, or omitted part.
+- Versions are compared numerically: `1.10.0` is newer than `1.9.0`. Uploading an older version later
+  does not replace the highest version as the default.
+- An author, package name, and version combination must be unique. Changes to members or source
+  code require a new version as well.
 
 ## ZIP v1 format
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import re
 import stat
 import subprocess
 import sys
@@ -193,9 +194,16 @@ def read_archive(path: Path) -> dict:
         "name": _text(manifest.get("name"), "name", MAX_NAME_LENGTH),
         "description": _description(manifest.get("description", "")),
         "author": _text(manifest.get("author"), "author", MAX_AUTHOR_LENGTH),
-        "version": _text(manifest.get("version"), "version", MAX_VERSION_LENGTH),
+        "version": _version(manifest.get("version")),
         "slots": slots,
     }
+
+
+def _version(value: object) -> str:
+    version = _text(value, "version", MAX_VERSION_LENGTH)
+    if not re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", version):
+        raise ValidationError("version must use major.minor.patch, for example 1.0.0")
+    return version
 
 
 def _description(value: object) -> str:
@@ -239,11 +247,11 @@ def build_catalog(
         manifest = read_archive(archive_path)
         identity = (
             manifest["author"],
+            manifest["name"],
             manifest["version"],
-            json.dumps(manifest["slots"], ensure_ascii=False, sort_keys=True),
         )
         if identity in identities:
-            raise ValidationError("duplicate team, author, and version")
+            raise ValidationError("duplicate author, package name, and version")
         identities.add(identity)
         relative_path = archive_path.relative_to(repository_root)
         updated_at = (

@@ -140,6 +140,42 @@ class BuildCatalogTests(unittest.TestCase):
             with redirect_stderr(StringIO()):
                 self.assertEqual(main(["--check", "--root", str(self.root)]), 1)
 
+    def test_versions_require_three_canonical_numeric_parts(self) -> None:
+        path = self.root / "codes" / "version.zip"
+        for version in (
+            "1", "1.0", "v1.0.0", "1.0.0-beta", "01.0.0", "1.00.0", "-1.0.0",
+            "\uff11.0.0", "1.0.0.0", "1" * 33 + ".0.0",
+        ):
+            with self.subTest(version=version):
+                write_archive(path, manifest(version=version))
+                with self.assertRaises(ValidationError):
+                    read_archive(path)
+        for version in ("0.0.0", "1.9.0", "1.10.0"):
+            write_archive(path, manifest(version=version))
+            self.assertEqual(read_archive(path)["version"], version)
+
+    def test_different_names_allow_same_author_members_and_version(self) -> None:
+        write_archive(self.root / "codes" / "first.zip")
+        second = {**manifest(), "name": "Another strategy"}
+        write_archive(self.root / "codes" / "second.zip", second)
+        self.assertEqual(len(build_catalog(self.root)["packages"]), 2)
+
+    def test_same_named_version_rejects_changed_members(self) -> None:
+        write_archive(self.root / "codes" / "first.zip")
+        second = manifest()
+        second["slots"][0]["impl_id"] = "builtin:another"
+        write_archive(self.root / "codes" / "second.zip", second)
+        with self.assertRaises(ValidationError):
+            build_catalog(self.root)
+
+    def test_retains_history_with_same_author_and_name(self) -> None:
+        for version in ("1.0.0", "1.9.0", "1.10.0"):
+            write_archive(self.root / "codes" / f"team_{version}.zip", manifest(version=version))
+        catalog = build_catalog(self.root, lambda path: "2026-09-01T00:00:00+00:00")
+        self.assertEqual(
+            {entry["version"] for entry in catalog["packages"]}, {"1.0.0", "1.9.0", "1.10.0"}
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
