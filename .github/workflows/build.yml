@@ -86,7 +86,7 @@ jobs:
           Set-Content -NoNewline -Encoding utf8 (Join-Path $target "teams.json") "{`n  `"format_version`": 1,`n  `"packages`": []`n}`n"
           git -C $target add codes/.gitkeep teams.json
           git -C $target commit -m "chore: initialize community catalog"
-          git -C $target push origin main
+          git -C $target push origin refs/heads/main:refs/heads/main
       - name: Synchronize CNB repository
         env:
           CNB_GH: ${{ secrets.CNB_GH }}
@@ -117,5 +117,5 @@ jobs:
           if ($diffStatus -ne 1) { throw "Failed to inspect CNB changes" }
           git -C $target commit -m "chore: sync community catalog"
           if ($LASTEXITCODE -ne 0) { throw "Failed to commit CNB catalog" }
-          git -C $target push origin main
+          git -C $target push origin refs/heads/main:refs/heads/main
           if ($LASTEXITCODE -ne 0) { throw "Failed to push CNB catalog" }
