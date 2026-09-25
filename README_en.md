@@ -12,9 +12,14 @@ Each ZIP contains a team configuration and any external Python character code re
 OK-NTE's **Team Management** page reads the generated `teams.json` catalog so users can search,
 inspect, and import packages from the Workshop.
 
-The repository is a static distribution channel. Contributors upload ZIP files through pull
-requests. After a merge, GitHub Actions validates the packages, rebuilds the catalog, and syncs
-`codes/` and `teams.json` to the CNB mirror.
+The repository is a static distribution channel. Package pull requests always target `main`; there is
+no branch switching between release phases. While China is ahead, maintainers set the repository
+variable `CN_AHEAD=true`. GitHub Actions still validates packages and builds the catalog, then syncs
+the ZIPs and new catalog to CNB without committing `teams.json` to GitHub. ZIP files will be visible
+in GitHub's `codes/` directory, while the international Workshop continues to use the old GitHub
+catalog. When the international release catches up, set `CN_AHEAD=false` and manually run the
+**Build community catalog** workflow on `main` once. This publishes the current catalog to GitHub and
+syncs CNB. Later merges to `main` automatically update both catalogs as usual.
 
 ## Use a community package
 
@@ -58,10 +63,13 @@ before saving or uploading. The files inside the archive do not need to change.
 2. Choose **Add file** → **Upload files** and upload the exported ZIP to the `codes/` root.
 3. Choose **Create a new branch for this commit and start a pull request**, then select
    **Propose changes**.
-4. Create the pull request and wait for validation and maintainer review.
+4. Create the pull request, always targeting `main`. Wait for validation and maintainer review.
 
-Do not edit `teams.json` directly. The publish workflow generates it after a PR is merged and
-updates both GitHub and the CNB mirror. The catalog retains every version. The Workshop groups
+Do not edit `teams.json` directly. The publish workflow generates it. When `CN_AHEAD=true`, a merge
+to `main` updates CNB's ZIPs and catalog while leaving GitHub's catalog unchanged. When it is `false`
+or unset, a merge to `main` updates GitHub and CNB. After China catches up, set it to `false` and
+manually run the workflow once to publish the GitHub catalog. Do not commit directly to CNB.
+The catalog retains every version. The Workshop groups
 packages by author and package name, displaying one row per group.
 
 ### Package identity and versions
@@ -136,9 +144,9 @@ these requirements:
 - Validation only reads JSON and parses Python with AST. It never imports, instantiates, or executes
   submitted Python.
 
-Pull requests run validation with read-only permissions and never receive the CNB sync secret. A
-merge to `main` runs the same validation again and produces a compact `teams.json`. A catalog above
-2 MiB emits a warning; one above 5 MiB fails publication.
+Pull requests run validation with read-only permissions and never receive the CNB sync secret. Before
+publishing, the workflow validates again and generates a compact `teams.json`. A catalog above 2 MiB
+emits a warning; one above 5 MiB fails publication.
 
 ## Contribution rules
 

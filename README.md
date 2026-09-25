@@ -11,8 +11,12 @@
 队伍方案，以及该方案实际需要的外置 Python 角色代码。OK-NTE 的“队伍管理”页面会读取本仓库
 生成的 `teams.json`，让用户在工坊内搜索、查看和导入方案。
 
-仓库仅负责静态分发。提交者通过 Pull Request 上传 ZIP，合并后 GitHub Actions 会校验包并更新
-索引，再同步 `codes/` 与 `teams.json` 到 CNB 镜像。
+仓库仅负责静态分发。所有 ZIP 的 Pull Request 始终合入 `main`，不需要在中国服领先和版本同步时切换分支。
+中国服领先期间，维护者设置仓库变量 `CN_AHEAD=true`：GitHub Actions 会照常校验并生成索引，随后将
+ZIP 和新索引同步到 CNB，但暂不提交 GitHub 上的 `teams.json`。因此 ZIP 文件会先出现在 GitHub 的
+`codes/` 目录，但国际服工坊仍按旧的 GitHub 索引显示。国际服追上后，将 `CN_AHEAD` 改为 `false`，
+并在 GitHub Actions 的 **Build community catalog** 工作流中对 `main` 手动运行一次；工作流会补交
+GitHub 索引并同步 CNB。之后恢复常规的合入 `main` 后自动更新两边。
 
 ## 使用社区方案
 
@@ -51,9 +55,11 @@
 2. 点击 **Add file** → **Upload files**，上传导出的 ZIP 到 `codes/` 根目录。
 3. 选择 **Create a new branch for this commit and start a pull request**，再点击
    **Propose changes**。
-4. 创建 Pull Request，等待校验通过和维护者审核。
+4. 创建 Pull Request，目标分支始终选 `main`，等待校验通过和审核。
 
-不要直接修改 `teams.json`。它由发布工作流生成；PR 合并后会自动更新 GitHub 和 CNB 镜像。
+不要直接修改 `teams.json`。它由发布工作流生成。仓库变量 `CN_AHEAD` 设为 `true` 时，合并到 `main`
+会更新 CNB 的 ZIP 和索引，但保留 GitHub 上的旧索引；设为 `false` 或未设置时，合并到 `main` 会更新
+GitHub 和 CNB。中国服追上后，设为 `false` 并手动运行一次工作流以发布 GitHub 索引。不要直接向 CNB 提交。
 所有版本都会保留在索引中; 工坊按作者和方案名称归组, 每组在主列表中只显示一行。
 
 ### 方案名称与版本规则
@@ -118,8 +124,8 @@ Example_Author_1.0.0.zip
 - 不接受数据库、角色特征、图片、模型、录像、文字出招表、凭据或与方案无关的内容。
 - 校验只读取 JSON 并使用 AST 检查 Python 语法，不会导入、实例化或执行提交的 Python。
 
-PR 使用只读权限运行校验，不会接触 CNB 同步密钥。合并到 `main` 后发布工作流会再次校验，
-生成紧凑的 `teams.json`；索引超过 2 MiB 会警告，超过 5 MiB 会阻止发布。
+PR 使用只读权限运行校验，不会接触 CNB 同步密钥。发布时工作流会再次校验并生成紧凑的 `teams.json`；
+索引超过 2 MiB 会警告，超过 5 MiB 会阻止发布。
 
 ## 提交规范
 

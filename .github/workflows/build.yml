@@ -41,7 +41,7 @@ jobs:
         run: python -m unittest discover -s tests -p "test_*.py"
 
   publish:
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: validate
     permissions:
       contents: write
@@ -63,6 +63,7 @@ jobs:
       - name: Build teams.json
         run: python scripts/build_catalog.py
       - name: Commit generated catalog
+        if: vars.CN_AHEAD != 'true'
         run: |
           git diff --quiet -- teams.json
           if ($LASTEXITCODE -eq 0) { exit 0 }
@@ -87,12 +88,34 @@ jobs:
           git -C $target commit -m "chore: initialize community catalog"
           git -C $target push origin main
       - name: Synchronize CNB repository
-        id: sync
-        uses: ok-oldking/partial-sync-repo@bbd55c1dffbcc1292a12295d949e7807b35ea93e
-        with:
-          repos: |
-            https://cnb:${{ secrets.CNB_GH }}@cnb.cool/BnanZ0/ok-nte-char-code.git
-          sync_list: deploy.txt
-          tag: main
-          gitignore_file: .update_repo_gitignore
-          show_author: true
+        env:
+          CNB_GH: ${{ secrets.CNB_GH }}
+        run: |
+          $target = Join-Path $env:RUNNER_TEMP "ok-nte-char-code-cnb-sync"
+          $target = [System.IO.Path]::GetFullPath($target)
+          git clone "https://cnb:$env:CNB_GH@cnb.cool/BnanZ0/ok-nte-char-code.git" $target
+          if ($LASTEXITCODE -ne 0) { throw "Failed to clone CNB repository" }
+          git -C $target config user.name "ok-nte catalog bot"
+          git -C $target config user.email "110257560+BnanZ0@users.noreply.github.com"
+
+          $targetCodes = [System.IO.Path]::GetFullPath((Join-Path $target "codes"))
+          $targetPrefix = $target.TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+          if (-not $targetCodes.StartsWith($targetPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Refusing to replace a path outside the CNB checkout"
+          }
+          if (Test-Path -LiteralPath $targetCodes) {
+            Remove-Item -LiteralPath $targetCodes -Recurse -Force
+          }
+          Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "codes") -Destination $target -Recurse -Force
+          Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "teams.json") -Destination $target -Force
+
+          git -C $target add --all codes teams.json
+          if ($LASTEXITCODE -ne 0) { throw "Failed to stage CNB catalog files" }
+          git -C $target diff --cached --quiet
+          $diffStatus = $LASTEXITCODE
+          if ($diffStatus -eq 0) { Write-Host "CNB catalog is already up to date"; exit 0 }
+          if ($diffStatus -ne 1) { throw "Failed to inspect CNB changes" }
+          git -C $target commit -m "chore: sync community catalog"
+          if ($LASTEXITCODE -ne 0) { throw "Failed to commit CNB catalog" }
+          git -C $target push origin main
+          if ($LASTEXITCODE -ne 0) { throw "Failed to push CNB catalog" }
