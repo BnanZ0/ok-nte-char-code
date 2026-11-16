@@ -1,81 +1,151 @@
-"""Run Semgrep over Python sources stored inside validated community archives."""
+"""Run Semgrep over Python sources stored inside community package archives."""
 
 from __future__ import annotations
 
+import argparse
+import json
 import subprocess
 import sys
 import tempfile
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from build_catalog import ValidationError, read_archive
 
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-ARCHIVE_DIRECTORY = REPOSITORY_ROOT / "codes"
-SEMGREP_CONFIG = REPOSITORY_ROOT / ".semgrep.yml"
+ROOT = Path(__file__).resolve().parents[1]
+CODES = ROOT / "codes"
+CONFIG = ROOT / ".semgrep.yml"
 
 
-def _stage_sources(destination: Path) -> int:
-    archives = sorted(ARCHIVE_DIRECTORY.glob("*.zip"), key=lambda path: path.name.lower())
-    source_count = 0
+def _archives(raw: str | None) -> list[Path]:
+    if raw is None:
+        return sorted(CODES.glob("*.zip"), key=lambda path: path.name.lower())
 
-    for index, archive_path in enumerate(archives, start=1):
-        # Reuse the package validator before reading any submitted paths or contents.
+    names = json.loads(raw)
+    if not isinstance(names, list) or any(not isinstance(name, str) for name in names):
+        raise ValidationError("Package paths must be a JSON string array")
+
+    result = []
+    for name in names:
+        path = PurePosixPath(name)
+        if (
+            "\\" in name
+            or len(path.parts) != 2
+            or path.parts[0] != "codes"
+            or path.suffix.lower() != ".zip"
+        ):
+            raise ValidationError(f"Invalid package path: {name}")
+        archive = CODES / path.name
+        if not archive.is_file():
+            raise ValidationError(f"Package archive is missing: {name}")
+        if archive not in result:
+            result.append(archive)
+    return result
+
+
+def _stage(destination: Path, archives: list[Path]) -> tuple[int, dict[str, str]]:
+    count = 0
+    packages = {}
+    for index, archive_path in enumerate(archives, 1):
         read_archive(archive_path)
-        package_directory = destination / f"package-{index:03d}"
+        package = destination / f"package-{index:03d}"
+        packages[package.name] = PurePosixPath("codes", archive_path.name).as_posix()
         with zipfile.ZipFile(archive_path) as archive:
             for entry in archive.infolist():
-                if not entry.filename.lower().endswith(".py"):
-                    continue
-                target = package_directory / entry.filename
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(archive.read(entry))
-                source_count += 1
-        print(f"package-{index:03d} <- {archive_path.name}")
-
-    return source_count
+                if entry.filename.lower().endswith(".py"):
+                    target = package / entry.filename
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(archive.read(entry))
+                    count += 1
+    return count, packages
 
 
-def _run_scan(source_directory: Path, severity: str, *, fail_on_findings: bool) -> int:
+def _scan(source: Path, severity: str, fail: bool) -> tuple[int, list[dict]]:
     command = [
-        "semgrep",
-        "scan",
-        "--metrics=off",
-        "--no-git-ignore",
-        "--config",
-        str(SEMGREP_CONFIG),
-        "--severity",
-        severity,
+        "semgrep", "scan", "--metrics=off", "--no-git-ignore",
+        "--config", str(CONFIG), "--severity", severity, "--json",
     ]
-    if fail_on_findings:
+    if fail:
         command.append("--error")
-    command.append(str(source_directory))
-    return subprocess.run(command, cwd=REPOSITORY_ROOT, check=False).returncode
+    completed = subprocess.run(
+        command + [str(source)],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    if completed.stderr:
+        print(completed.stderr, file=sys.stderr, end="")
+    try:
+        findings = json.loads(completed.stdout).get("results", [])
+    except (json.JSONDecodeError, AttributeError) as error:
+        raise RuntimeError(f"Semgrep did not return JSON results: {error}") from error
+    print(f"Semgrep {severity}: {len(findings)} finding(s)")
+    return completed.returncode, findings
+
+
+def _findings(results: list[dict], source: Path, packages: dict[str, str]) -> list[dict]:
+    output = []
+    root = source.resolve()
+    for result in results:
+        path = Path(result["path"])
+        if not path.is_absolute():
+            path = source / path
+        try:
+            relative = path.resolve().relative_to(root)
+        except ValueError:
+            continue
+        extra = result.get("extra", {})
+        if len(relative.parts) < 2 or relative.parts[0] not in packages:
+            continue
+        output.append({
+            "archive": packages[relative.parts[0]],
+            "path": PurePosixPath(*relative.parts[1:]).as_posix(),
+            "line": result.get("start", {}).get("line", 1),
+            "rule_id": result.get("check_id", "unknown"),
+            "severity": extra.get("severity", "WARNING"),
+            "message": extra.get("message", ""),
+        })
+    return output
 
 
 def main() -> int:
-    if not SEMGREP_CONFIG.is_file():
-        print(f"Semgrep configuration not found: {SEMGREP_CONFIG}", file=sys.stderr)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--archives-json", help="Only scan these codes/*.zip paths")
+    parser.add_argument("--report-file", type=Path, help="Write findings as JSON")
+    args = parser.parse_args()
+    if not CONFIG.is_file():
+        print(f"Semgrep configuration not found: {CONFIG}", file=sys.stderr)
         return 2
 
     try:
-        with tempfile.TemporaryDirectory(prefix="ok-nte-semgrep-") as temporary_directory:
-            source_directory = Path(temporary_directory)
-            source_count = _stage_sources(source_directory)
-            if source_count == 0:
-                print("No external Python files to scan.")
-                return 0
+        archives = _archives(args.archives_json)
+        findings = []
+        warning_status = error_status = 0
+        with tempfile.TemporaryDirectory(prefix="ok-nte-semgrep-") as temporary:
+            source = Path(temporary)
+            count, packages = _stage(source, archives)
+            if count:
+                warning_status, warning_results = _scan(source, "WARNING", False)
+                findings += _findings(warning_results, source, packages)
+                if warning_status == 0:
+                    error_status, error_results = _scan(source, "ERROR", True)
+                    findings += _findings(error_results, source, packages)
 
-            # Warnings are visible in the job log but do not block a PR.
-            warning_status = _run_scan(source_directory, "WARNING", fail_on_findings=False)
-            if warning_status:
-                return warning_status
-
-            # High-confidence policy violations fail the validation job.
-            return _run_scan(source_directory, "ERROR", fail_on_findings=True)
-    except (OSError, zipfile.BadZipFile, ValidationError) as error:
-        print(f"Unable to scan community package source: {error}", file=sys.stderr)
+        if args.report_file:
+            args.report_file.parent.mkdir(parents=True, exist_ok=True)
+            args.report_file.write_text(json.dumps({
+                "schema_version": 1,
+                "packages": [PurePosixPath("codes", path.name).as_posix() for path in archives],
+                "findings": findings,
+            }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        for item in findings:
+            print(f"{item['archive']}:{item['path']}:{item['line']} {item['rule_id']}")
+        return warning_status or error_status
+    except (OSError, zipfile.BadZipFile, ValidationError, json.JSONDecodeError, RuntimeError) as error:
+        print(f"Unable to scan package source: {error}", file=sys.stderr)
         return 2
 
 

@@ -1,0 +1,80 @@
+name: Comment Semgrep findings on PR
+
+on:
+  workflow_run:
+    workflows: ["Build community catalog"]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  comment:
+    if: github.event.workflow_run.event == 'pull_request'
+    permissions:
+      actions: read
+      issues: write
+      pull-requests: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        continue-on-error: true
+        with:
+          name: semgrep-findings
+          path: ${{ runner.temp }}/semgrep-report
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.workflow_run.id }}
+      - uses: actions/github-script@v9
+        env:
+          REPORT_PATH: ${{ runner.temp }}/semgrep-report/semgrep-findings.json
+        with:
+          script: |
+            const fs = require("fs");
+            const marker = "<!-- ok-nte-semgrep-report -->";
+            const { owner, repo } = context.repo;
+            const run = context.payload.workflow_run;
+            const pullRequests = await github.paginate(github.rest.pulls.list, {
+              owner, repo, state: "open", per_page: 100,
+            });
+            const pr = pullRequests.find(item => item.head.sha === run.head_sha);
+            if (!pr) return core.notice("No open PR matches this scan commit.");
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner, repo, pull_number: pr.number, per_page: 100,
+            });
+            const changed = new Set(files
+              .filter(file => file.status !== "removed" && /^codes\/[^/]+\.zip$/.test(file.filename))
+              .map(file => file.filename));
+            if (!fs.existsSync(process.env.REPORT_PATH)) {
+              return core.warning("The Semgrep report was not uploaded.");
+            }
+            if (fs.statSync(process.env.REPORT_PATH).size > 1_000_000) {
+              return core.warning("The Semgrep report is too large.");
+            }
+            const report = JSON.parse(fs.readFileSync(process.env.REPORT_PATH, "utf8"));
+            if (report.schema_version !== 1 || !Array.isArray(report.findings)) {
+              throw new Error("Invalid Semgrep report.");
+            }
+            const findings = report.findings.filter(item =>
+              changed.has(item.archive) && typeof item.path === "string" &&
+              typeof item.rule_id === "string" && Number.isInteger(item.line) &&
+              ["ERROR", "WARNING", "INFO"].includes(item.severity));
+            const escape = value => String(value).slice(0, 300)
+              .replace(/[\r\n\t]/g, " ").replace(/&/g, "&amp;")
+              .replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/@/g, "&#64;");
+            const lines = findings.slice(0, 30).map(item =>
+              `- <code>${escape(item.archive)}</code> → <code>${escape(item.path)}:${item.line}</code> ` +
+              `(<code>${escape(item.rule_id)}</code>, ${escape(item.severity)})<br>${escape(item.message || "")}`);
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number: pr.number, per_page: 100,
+            });
+            const previous = comments.find(comment =>
+              comment.user?.type === "Bot" && comment.body?.includes(marker));
+            const body = [marker, "## Semgrep findings in changed packages", "",
+              lines.length ? lines.join("\n") : "✅ No findings in the changed package ZIPs.",
+              "", "Static analysis can produce false positives; please review the results."].join("\n");
+            if (previous) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: previous.id, body });
+            } else if (lines.length) {
+              await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body });
+            }
