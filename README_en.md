@@ -37,9 +37,9 @@ an existing external-code directory or local team; use a distinct directory for 
 
 > [!WARNING]
 > Community packages can contain external Python code. CI checks the archive structure, JSON, and
-> Python syntax but **does not execute** submitted code. After import, OK-NTE must load external
-> code to run the character logic. Import only packages from trusted authors or sources you have
-> reviewed yourself.
+> Python syntax, and uses Semgrep to statically scan the Python source. A scan cannot prove code is
+> safe, and CI **does not execute** submitted code. After import, OK-NTE loads external code to run
+> the character logic. Import only packages from trusted authors or sources you have reviewed.
 
 ## Export and submit a package
 
@@ -141,8 +141,12 @@ these requirements:
   binary assets, and undeclared files are rejected.
 - Do not include databases, character features, images, models, recordings, text move lists,
   credentials, or unrelated content.
-- Validation only reads JSON and parses Python with AST. It never imports, instantiates, or executes
-  submitted Python.
+- Validation reads JSON, parses Python with AST, and runs Semgrep over Python files in the archives.
+  It never imports, instantiates, or executes submitted Python. High-confidence dynamic execution,
+  process, network, and filesystem-mutation rules fail the PR; environment access, unpaced input
+  APIs in unbounded loops, and near-zero loop waits are reported for review. Calls with explicit
+  `interval` or `after_sleep` arguments are excluded from these pacing warnings; review their values
+  separately.
 
 Pull requests run validation with read-only permissions and never receive the CNB sync secret. Before
 publishing, the workflow validates again and generates a compact `teams.json`. A catalog above 2 MiB

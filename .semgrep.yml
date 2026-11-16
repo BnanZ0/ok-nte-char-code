@@ -1,0 +1,223 @@
+rules:
+  - id: ok-nte-dynamic-python-execution
+    message: >-
+      Community character code must not evaluate dynamically supplied Python.
+      Review this use and replace it with explicit logic.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      confidence: high
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: exec(...)
+      - pattern: compile(...)
+      - pattern: __import__(...)
+      - pattern: importlib.import_module(...)
+
+  - id: ok-nte-process-execution
+    message: >-
+      Community character code must not launch operating-system processes.
+      Review this call; process execution is outside the package format.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      confidence: high
+    pattern-either:
+      - pattern: subprocess.$FUNC(...)
+      - pattern: import subprocess
+      - pattern: import subprocess as $ALIAS
+      - pattern: from subprocess import $FUNC
+      - pattern: os.system(...)
+      - pattern: os.popen(...)
+      - pattern: os.execv(...)
+      - pattern: os.execve(...)
+      - pattern: os.spawnv(...)
+      - pattern: os.spawnve(...)
+      - pattern: os.startfile(...)
+
+  - id: ok-nte-network-access
+    message: >-
+      Community character code must not make network requests or open sockets.
+      Review this call and remove external communication.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      confidence: high
+    pattern-either:
+      - pattern: socket.$FUNC(...)
+      - pattern: import socket
+      - pattern: import socket as $ALIAS
+      - pattern: from socket import $FUNC
+      - pattern: requests.$FUNC(...)
+      - pattern: import requests
+      - pattern: import requests as $ALIAS
+      - pattern: from requests import $FUNC
+      - pattern: urllib.request.urlopen(...)
+      - pattern: import urllib.request
+      - pattern: import urllib.request as $ALIAS
+      - pattern: from urllib.request import $FUNC
+      - pattern: httpx.$FUNC(...)
+      - pattern: import httpx
+      - pattern: import httpx as $ALIAS
+      - pattern: from httpx import $FUNC
+      - pattern: aiohttp.ClientSession(...)
+      - pattern: import aiohttp
+      - pattern: import aiohttp as $ALIAS
+      - pattern: from aiohttp import $FUNC
+      - pattern: http.client.HTTPConnection(...)
+      - pattern: import http.client
+      - pattern: import http.client as $ALIAS
+      - pattern: from http.client import $FUNC
+      - pattern: ftplib.FTP(...)
+      - pattern: import ftplib
+      - pattern: import ftplib as $ALIAS
+      - pattern: from ftplib import $FUNC
+
+  - id: ok-nte-filesystem-mutation
+    message: >-
+      Community character code must not modify or delete arbitrary local files.
+      Review this filesystem operation.
+    languages: [python]
+    severity: ERROR
+    metadata:
+      category: security
+      confidence: high
+    pattern-either:
+      - pattern: open($PATH, "w", ...)
+      - pattern: open($PATH, "a", ...)
+      - pattern: open($PATH, "x", ...)
+      - pattern: open($PATH, "wb", ...)
+      - pattern: open($PATH, "ab", ...)
+      - pattern: open($PATH, mode="w", ...)
+      - pattern: open($PATH, mode="a", ...)
+      - pattern: $PATH.write_text(...)
+      - pattern: $PATH.write_bytes(...)
+      - pattern: $PATH.unlink(...)
+      - pattern: $PATH.rmdir(...)
+      - pattern: os.remove(...)
+      - pattern: os.unlink(...)
+      - pattern: os.rename(...)
+      - pattern: os.replace(...)
+      - pattern: shutil.rmtree(...)
+
+  - id: ok-nte-environment-access
+    message: >-
+      Reading process environment variables can expose local configuration or
+      credentials. Review whether this access is necessary.
+    languages: [python]
+    severity: WARNING
+    metadata:
+      category: security
+      confidence: medium
+    pattern-either:
+      - pattern: os.getenv(...)
+      - pattern: os.environ[...]
+
+  - id: ok-nte-tight-input-loop
+    message: >-
+      This unbounded loop calls a game-input API without an explicit interval or
+      after_sleep argument and without a visible sleep. Review the API defaults
+      and add an intentional pacing mechanism if needed.
+    languages: [python]
+    severity: WARNING
+    metadata:
+      category: security
+      confidence: medium
+    patterns:
+      - pattern-inside: |
+          while True:
+            ...
+      - pattern-either:
+          - patterns:
+              - pattern: $OBJ.$METHOD(...)
+              - metavariable-regex:
+                  metavariable: $METHOD
+                  regex: '^(click|send_key|send_skill_key|send_ultimate_key|send_arc_key)$'
+              - pattern-not: $OBJ.$METHOD(..., interval=$INTERVAL, ...)
+              - pattern-not: $OBJ.$METHOD(..., after_sleep=$AFTER_SLEEP, ...)
+          - patterns:
+              - pattern: $OBJ.$METHOD($AFTER_SLEEP, ...)
+              - metavariable-regex:
+                  metavariable: $METHOD
+                  regex: '^(send_skill_key|send_ultimate_key|send_arc_key)$'
+          - pattern: $OBJ.send_key($KEY, $DOWN_TIME, $INTERVAL, ...)
+          - pattern: $OBJ.click($X, $Y, $MOVE_BACK, $NAME, $INTERVAL, ...)
+          - patterns:
+              - pattern: $OBJ.$METHOD(...)
+              - metavariable-regex:
+                  metavariable: $METHOD
+                  regex: '^(send_key_down|send_key_up)$'
+              - pattern-not: $OBJ.$METHOD(..., after_sleep=$AFTER_SLEEP, ...)
+          - patterns:
+              - pattern: $OBJ.$METHOD($KEY, $AFTER_SLEEP, ...)
+              - metavariable-regex:
+                  metavariable: $METHOD
+                  regex: '^(send_key_down|send_key_up)$'
+          - pattern: $OBJ.normal_attack()
+          - pattern: $OBJ.click_arc()
+      - pattern-not-inside: |
+          while True:
+            ...
+            $SLEEPER.sleep(...)
+            ...
+      - pattern-not-inside: |
+          while True:
+            ...
+            time.sleep(...)
+            ...
+
+  - id: ok-nte-zero-delay-input-loop
+    message: >-
+      This unbounded loop combines an unpaced game-input API with a zero or
+      near-zero sleep. Review the expected input rate.
+    languages: [python]
+    severity: WARNING
+    metadata:
+      category: security
+      confidence: medium
+    patterns:
+      - pattern-inside: |
+          while True:
+            ...
+      - pattern-either:
+          - patterns:
+              - pattern: $OBJ.$METHOD(...)
+              - metavariable-regex:
+                  metavariable: $METHOD
+                  regex: '^(click|send_key|send_skill_key|send_ultimate_key|send_arc_key)$'
+              - pattern-not: $OBJ.$METHOD(..., interval=$INTERVAL, ...)
+              - pattern-not: $OBJ.$METHOD(..., after_sleep=$AFTER_SLEEP, ...)
+          - patterns:
+              - pattern: $OBJ.$METHOD($AFTER_SLEEP, ...)
+              - metavariable-regex:
+                  metavariable: $METHOD
+                  regex: '^(send_skill_key|send_ultimate_key|send_arc_key)$'
+          - pattern: $OBJ.send_key($KEY, $DOWN_TIME, $INTERVAL, ...)
+          - pattern: $OBJ.click($X, $Y, $MOVE_BACK, $NAME, $INTERVAL, ...)
+          - patterns:
+              - pattern: $OBJ.$METHOD(...)
+              - metavariable-regex:
+                  metavariable: $METHOD
+                  regex: '^(send_key_down|send_key_up)$'
+              - pattern-not: $OBJ.$METHOD(..., after_sleep=$AFTER_SLEEP, ...)
+          - patterns:
+              - pattern: $OBJ.$METHOD($KEY, $AFTER_SLEEP, ...)
+              - metavariable-regex:
+                  metavariable: $METHOD
+                  regex: '^(send_key_down|send_key_up)$'
+          - pattern: $OBJ.normal_attack()
+          - pattern: $OBJ.click_arc()
+      - pattern-either:
+          - pattern: $SLEEPER.sleep(0)
+          - pattern: $SLEEPER.sleep(0.0)
+          - pattern: $SLEEPER.sleep(0.001)
+          - pattern: $SLEEPER.sleep(0.005)
+          - pattern: $SLEEPER.sleep(0.01)
+          - pattern: time.sleep(0)
+          - pattern: time.sleep(0.0)
+          - pattern: time.sleep(0.001)
+          - pattern: time.sleep(0.005)
+          - pattern: time.sleep(0.01)
