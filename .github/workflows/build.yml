@@ -42,8 +42,8 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - name: Find changed package archives
-        id: changed-packages
+      - name: Select packages to scan
+        id: scan-scope
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v9
         with:
@@ -54,6 +54,14 @@ jobs:
               pull_number: context.payload.pull_request.number,
               per_page: 100,
             });
+            const scanInputs = new Set([
+              ".semgrep.yml", "scripts/scan_packages.py", "scripts/build_catalog.py",
+              ".github/workflows/build.yml", ".github/workflows/semgrep-pr-comment.yml",
+            ]);
+            const scanAll = files.some(file =>
+              scanInputs.has(file.filename) || scanInputs.has(file.previous_filename));
+            if (scanAll || files.length < context.payload.pull_request.changed_files) return;
+
             const archives = [...new Set(files
               .filter(file => file.status !== "removed" &&
                 /^codes\/[^/]+\.zip$/.test(file.filename))
@@ -64,19 +72,23 @@ jobs:
       - name: Install Semgrep Community Edition
         run: python -m pip install semgrep==1.185.0
       - name: Scan package Python code
-        if: github.event_name != 'pull_request'
-        run: python scripts/scan_packages.py
-      - name: Scan changed PR packages
-        if: github.event_name == 'pull_request'
         env:
-          CHANGED_PACKAGE_ARCHIVES: ${{ steps.changed-packages.outputs.archives }}
+          CHANGED_PACKAGE_ARCHIVES: ${{ steps.scan-scope.outputs.archives }}
           SCAN_REPORT_PATH: ${{ runner.temp }}/semgrep-findings.json
-        run: python scripts/scan_packages.py --archives-json "$env:CHANGED_PACKAGE_ARCHIVES" --report-file "$env:SCAN_REPORT_PATH"
+        run: |
+          $scanArgs = @()
+          if ($env:GITHUB_EVENT_NAME -eq 'pull_request') {
+            $scanArgs += @('--report-file', $env:SCAN_REPORT_PATH)
+            if ($env:CHANGED_PACKAGE_ARCHIVES) {
+              $scanArgs += @('--archives-json', $env:CHANGED_PACKAGE_ARCHIVES)
+            }
+          }
+          python scripts/scan_packages.py @scanArgs
       - name: Upload Semgrep report for PR comment
         if: always() && github.event_name == 'pull_request'
         uses: actions/upload-artifact@v7
         with:
-          name: semgrep-findings
+          name: semgrep-findings-${{ github.run_attempt }}
           path: ${{ runner.temp }}/semgrep-findings.json
           if-no-files-found: ignore
           retention-days: 1

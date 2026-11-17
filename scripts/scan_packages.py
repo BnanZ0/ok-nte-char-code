@@ -61,15 +61,14 @@ def _stage(destination: Path, archives: list[Path]) -> tuple[int, dict[str, str]
     return count, packages
 
 
-def _scan(source: Path, severity: str, fail: bool) -> tuple[int, list[dict]]:
+def _scan(source: Path) -> list[dict]:
     command = [
         "semgrep", "scan", "--metrics=off", "--no-git-ignore",
-        "--config", str(CONFIG), "--severity", severity, "--json",
+        "--config", str(CONFIG), "--severity", "WARNING", "--severity", "ERROR",
+        "--json", str(source),
     ]
-    if fail:
-        command.append("--error")
     completed = subprocess.run(
-        command + [str(source)],
+        command,
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -78,12 +77,16 @@ def _scan(source: Path, severity: str, fail: bool) -> tuple[int, list[dict]]:
     )
     if completed.stderr:
         print(completed.stderr, file=sys.stderr, end="")
+    if completed.returncode != 0:
+        raise RuntimeError(f"Semgrep failed with exit code {completed.returncode}")
     try:
-        findings = json.loads(completed.stdout).get("results", [])
-    except (json.JSONDecodeError, AttributeError) as error:
+        findings = json.loads(completed.stdout)["results"]
+    except (json.JSONDecodeError, KeyError, TypeError) as error:
         raise RuntimeError(f"Semgrep did not return JSON results: {error}") from error
-    print(f"Semgrep {severity}: {len(findings)} finding(s)")
-    return completed.returncode, findings
+    if not isinstance(findings, list):
+        raise RuntimeError("Semgrep JSON results must be an array")
+    print(f"Semgrep: {len(findings)} finding(s)")
+    return findings
 
 
 def _findings(results: list[dict], source: Path, packages: dict[str, str]) -> list[dict]:
@@ -122,17 +125,13 @@ def main() -> int:
 
     try:
         archives = _archives(args.archives_json)
-        findings = []
-        warning_status = error_status = 0
         with tempfile.TemporaryDirectory(prefix="ok-nte-semgrep-") as temporary:
             source = Path(temporary)
             count, packages = _stage(source, archives)
-            if count:
-                warning_status, warning_results = _scan(source, "WARNING", False)
-                findings += _findings(warning_results, source, packages)
-                if warning_status == 0:
-                    error_status, error_results = _scan(source, "ERROR", True)
-                    findings += _findings(error_results, source, packages)
+            results = _scan(source) if count else []
+            # An ERROR still blocks if its location could not be mapped to an archive.
+            blocked = any(result["extra"]["severity"] == "ERROR" for result in results)
+            findings = _findings(results, source, packages)
 
         if args.report_file:
             args.report_file.parent.mkdir(parents=True, exist_ok=True)
@@ -143,7 +142,7 @@ def main() -> int:
             }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         for item in findings:
             print(f"{item['archive']}:{item['path']}:{item['line']} {item['rule_id']}")
-        return warning_status or error_status
+        return int(blocked)
     except (OSError, zipfile.BadZipFile, ValidationError, json.JSONDecodeError, RuntimeError) as error:
         print(f"Unable to scan package source: {error}", file=sys.stderr)
         return 2
