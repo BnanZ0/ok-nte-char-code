@@ -62,7 +62,8 @@ jobs:
             const escape = value => String(value).slice(0, 300)
               .replace(/[\r\n\t]/g, " ").replace(/&/g, "&amp;")
               .replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/@/g, "&#64;");
-            const code = value => `\`${escape(value).replace(/`/g, "&#96;")}\``;
+            const tick = String.fromCharCode(96);
+            const code = value => tick + escape(value).split(tick).join("&#96;") + tick;
             const severityOrder = { ERROR: 0, WARNING: 1, INFO: 2 };
             const severityCounts = findings.reduce((counts, item) => {
               counts[item.severity] = (counts[item.severity] || 0) + 1;
@@ -116,7 +117,7 @@ jobs:
               comment.user?.type === "Bot" && comment.body?.includes(marker));
             const archivesWithFindings = new Set(findings.map(item => item.archive)).size;
             const summary = findings.length
-              ? `**${findings.length} findings** across **${archivesWithFindings} archives** (`${severitySummary}`) · *Please review manually.*`
+              ? `**${findings.length} findings** across **${archivesWithFindings} archives** (${tick}${severitySummary}${tick}) · *Please review manually.*`
               : "✅ No findings in the changed package ZIPs.";
             const truncated = findings.length > 30
               ? `Showing the first 30 findings; rule and archive counts below reflect the displayed findings.`
