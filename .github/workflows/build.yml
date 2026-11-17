@@ -4,20 +4,10 @@ on:
   pull_request:
     paths:
       - "codes/**"
-      - "scripts/build_catalog.py"
-      - "scripts/scan_packages.py"
-      - ".semgrep.yml"
-      - ".github/workflows/build.yml"
-      - ".github/workflows/semgrep-pr-comment.yml"
   push:
     branches: [main]
     paths:
       - "codes/**"
-      - "scripts/build_catalog.py"
-      - "scripts/scan_packages.py"
-      - ".semgrep.yml"
-      - ".github/workflows/build.yml"
-      - ".github/workflows/semgrep-pr-comment.yml"
   workflow_dispatch:
 
 permissions:
