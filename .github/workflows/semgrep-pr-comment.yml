@@ -62,20 +62,71 @@ jobs:
             const escape = value => String(value).slice(0, 300)
               .replace(/[\r\n\t]/g, " ").replace(/&/g, "&amp;")
               .replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/@/g, "&#64;");
-            const lines = findings.slice(0, 30).map(item =>
-              `- <code>${escape(item.archive)}</code> → <code>${escape(item.path)}:${item.line}</code> ` +
-              `(<code>${escape(item.rule_id)}</code>, ${escape(item.severity)})<br>${escape(item.message || "")}`);
+            const code = value => `\`${escape(value).replace(/`/g, "&#96;")}\``;
+            const severityOrder = { ERROR: 0, WARNING: 1, INFO: 2 };
+            const severityCounts = findings.reduce((counts, item) => {
+              counts[item.severity] = (counts[item.severity] || 0) + 1;
+              return counts;
+            }, {});
+            const severitySummary = Object.entries(severityOrder)
+              .filter(([severity]) => severityCounts[severity])
+              .map(([severity]) => `${severityCounts[severity]} ${severity.toLowerCase()}${severityCounts[severity] === 1 ? "" : "s"}`)
+              .join(", ");
+            const groups = new Map();
+            const orderedFindings = [...findings].sort((a, b) =>
+              severityOrder[a.severity] - severityOrder[b.severity] ||
+              a.rule_id.localeCompare(b.rule_id) || a.archive.localeCompare(b.archive) ||
+              a.path.localeCompare(b.path) || a.line - b.line);
+            for (const item of orderedFindings.slice(0, 30)) {
+              const key = `${item.severity}\0${item.rule_id}`;
+              let group = groups.get(key);
+              if (!group) {
+                group = { severity: item.severity, ruleId: item.rule_id, count: 0, messages: new Map() };
+                groups.set(key, group);
+              }
+              group.count++;
+              const message = typeof item.message === "string" ? item.message : "";
+              let archives = group.messages.get(message);
+              if (!archives) group.messages.set(message, archives = new Map());
+              let paths = archives.get(item.archive);
+              if (!paths) archives.set(item.archive, paths = new Map());
+              let lines = paths.get(item.path);
+              if (!lines) paths.set(item.path, lines = new Map());
+              lines.set(item.line, (lines.get(item.line) || 0) + 1);
+            }
+            const icons = { ERROR: "❌", WARNING: "⚠️", INFO: "ℹ️" };
+            const sections = [...groups.values()].map(group => {
+              const messageBlocks = [...group.messages.entries()].map(([message, archives]) => {
+                const details = [...archives.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([archive, paths]) => {
+                  const count = [...paths.values()].reduce((total, lines) =>
+                    total + [...lines.values()].reduce((sum, matches) => sum + matches, 0), 0);
+                  const locations = [...paths.entries()].sort(([a], [b]) => a.localeCompare(b))
+                    .map(([path, lines]) => `  - ${code(path)}: ${[...lines.entries()].sort(([a], [b]) => a - b)
+                      .map(([line, matches]) => `L${line}${matches > 1 ? ` (${matches})` : ""}`).join(", ")}`);
+                  return [`- **${code(archive)}** (${count})`, ...locations].join("\n");
+                });
+                return [...(message ? [`> ${escape(message)}`, ""] : []), ...details].join("\n");
+              });
+              return `### ${icons[group.severity]} ${code(group.severity)} · ${code(group.ruleId)} (${group.count})\n\n${messageBlocks.join("\n\n")}`;
+            });
             const comments = await github.paginate(github.rest.issues.listComments, {
               owner, repo, issue_number: pr.number, per_page: 100,
             });
             const previous = comments.find(comment =>
               comment.user?.type === "Bot" && comment.body?.includes(marker));
-            const body = [marker, "## Semgrep findings in changed packages", "",
-              lines.length ? lines.join("\n") : "✅ No findings in the changed package ZIPs.",
-              "", "Static analysis can produce false positives; please review the results."].join("\n");
+            const archivesWithFindings = new Set(findings.map(item => item.archive)).size;
+            const summary = findings.length
+              ? `**${findings.length} findings** across **${archivesWithFindings} archives** (`${severitySummary}`) · *Please review manually.*`
+              : "✅ No findings in the changed package ZIPs.";
+            const truncated = findings.length > 30
+              ? `Showing the first 30 findings; rule and archive counts below reflect the displayed findings.`
+              : "";
+            const body = [marker, "## 🔍 Semgrep findings in changed packages", "", summary,
+              truncated, ...sections].filter(Boolean).join("\n\n");
             if (previous) {
               await github.rest.issues.updateComment({ owner, repo, comment_id: previous.id, body });
-            } else if (lines.length) {
+            } else if (findings.length) {
               await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body });
             }
+
 
