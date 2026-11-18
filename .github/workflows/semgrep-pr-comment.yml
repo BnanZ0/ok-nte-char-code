@@ -1,92 +1,38 @@
 name: Comment Semgrep findings on PR
 
 on:
-  workflow_run:
-    workflows: ["Build community catalog"]
-    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        required: true
+        type: string
+      head_sha:
+        required: true
+        type: string
+      base_ref:
+        required: true
+        type: string
+      body:
+        required: true
+        type: string
 
-permissions: {}
+permissions:
+  pull-requests: write
 
 jobs:
   comment:
-    if: github.event.workflow_run.event == 'pull_request'
-    permissions:
-      actions: read
-      pull-requests: write
+    if: github.event.sender.login == 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v8
-        continue-on-error: true
-        with:
-          name: semgrep-findings-${{ github.event.workflow_run.run_attempt }}
-          path: ${{ runner.temp }}/semgrep-report
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          run-id: ${{ github.event.workflow_run.id }}
       - uses: actions/github-script@v9
-        env:
-          REPORT_PATH: ${{ runner.temp }}/semgrep-report/semgrep-findings.json
         with:
           script: |
-            const fs = require("fs");
-            if (!fs.existsSync(process.env.REPORT_PATH)) {
-              return core.notice("No completed Semgrep report is available.");
-            }
-            if (fs.statSync(process.env.REPORT_PATH).size > 1_000_000) {
-              return core.warning("The Semgrep report is too large.");
-            }
-            const report = JSON.parse(fs.readFileSync(process.env.REPORT_PATH, "utf8"));
-            if (report?.schema_version !== 1 || !Array.isArray(report.findings)) {
-              throw new Error("Invalid Semgrep report.");
-            }
-            const findings = report.findings.filter(item =>
-              typeof item?.archive === "string" && typeof item.path === "string" &&
-              typeof item.rule_id === "string" && Number.isSafeInteger(item.line) && item.line > 0 &&
-              ["ERROR", "WARNING", "INFO"].includes(item.severity));
-            if (!findings.length) return;
-
+            const { pr_number, head_sha, base_ref, body } = context.payload.inputs;
             const { owner, repo } = context.repo;
-            const run = context.payload.workflow_run;
-            if (!run.head_repository || !run.head_branch || !run.head_sha) return;
-            const matchesHead = pr =>
-              pr.head.sha === run.head_sha && pr.head.ref === run.head_branch &&
-              pr.head.repo?.id === run.head_repository.id;
-
-            const associated = run.pull_requests ?? [];
-            let pr;
-            if (associated.length === 1) {
-              ({ data: pr } = await github.rest.pulls.get({
-                owner, repo, pull_number: associated[0].number,
-              }));
-              if (associated[0].base?.ref && pr.base.ref !== associated[0].base.ref) return;
-            } else if (associated.length === 0) {
-              // Fork runs can have no associated PRs. Include closed PRs to detect ambiguity.
-              const candidates = await github.paginate(github.rest.pulls.list, {
-                owner, repo, state: "all", per_page: 100,
-                head: run.head_repository.owner.login + ":" + run.head_branch,
-              });
-              const matches = candidates.filter(candidate =>
-                matchesHead(candidate) && candidate.created_at <= run.created_at);
-              if (matches.length === 1) pr = matches[0];
+            const { data: pr } = await github.rest.pulls.get({
+              owner, repo, pull_number: Number(pr_number),
+            });
+            if (pr.state !== "open" || pr.head.sha !== head_sha || pr.base.ref !== base_ref) {
+              return core.notice("The pull request changed after the Semgrep scan.");
             }
-            if (!pr || pr.state !== "open" || !matchesHead(pr)) {
-              return core.notice("No unique open PR matches this Semgrep run.");
-            }
-
-            // Indented code renders report fields as text; normalize line breaks first.
-            const singleLine = value => value.replace(/[\u0000-\u001f\u0085\u2028\u2029]/g, " ").slice(0, 160);
-            const errors = findings.filter(item => item.severity === "ERROR");
-            const limit = 10;
-            const details = [...errors,
-              ...findings.filter(item => item.severity !== "ERROR")].slice(0, limit).map(item =>
-              "    " + item.severity + " " + singleLine(item.archive) + " / " +
-              singleLine(item.path) + ":" + item.line + " (" + singleLine(item.rule_id) + ")");
-            const body = [
-              "**Semgrep:** " + findings.length + " finding(s), " + errors.length + " error(s).",
-              "",
-              ...details,
-              "",
-              (findings.length > limit ? "Showing " + limit + " findings. " : "") +
-                "[View scan logs](" + run.html_url + ").",
-            ].join("\n");
             await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body });

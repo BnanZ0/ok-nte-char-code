@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -114,6 +115,38 @@ def _findings(results: list[dict], source: Path, packages: dict[str, str]) -> li
     return output
 
 
+def _write_pr_comment(output: Path, findings: list[dict]) -> None:
+    def single_line(value: str) -> str:
+        return " ".join(value.splitlines())[:160]
+
+    ordered = sorted(findings, key=lambda item: item["severity"] != "ERROR")
+    errors = sum(item["severity"] == "ERROR" for item in findings)
+    limit = 10
+    lines = [f"**Semgrep:** {len(findings)} finding(s), {errors} error(s).", ""]
+    for item in ordered[:limit]:
+        lines.append(
+            f"    {item['severity']} {single_line(item['archive'])} / "
+            f"{single_line(item['path'])}:{item['line']} ({single_line(item['rule_id'])})"
+        )
+    run_url = (
+        f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
+        f"/actions/runs/{os.environ['GITHUB_RUN_ID']}"
+    )
+    preview = f"Showing {limit} findings. " if len(findings) > limit else ""
+    lines.extend(["", f"{preview}[View scan logs]({run_url})."])
+
+    event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
+    pr = event["pull_request"]
+    inputs = {
+        "pr_number": str(pr["number"]),
+        "head_sha": pr["head"]["sha"],
+        "base_ref": pr["base"]["ref"],
+        "body": "\n".join(lines),
+    }
+    with output.open("a", encoding="utf-8") as stream:
+        stream.write(f"comment={json.dumps(inputs)}\n")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--archives-json", help="Only scan these codes/*.zip paths")
@@ -142,6 +175,9 @@ def main() -> int:
             }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         for item in findings:
             print(f"{item['archive']}:{item['path']}:{item['line']} {item['rule_id']}")
+        output = os.getenv("GITHUB_OUTPUT")
+        if output and findings and os.getenv("GITHUB_EVENT_NAME") == "pull_request":
+            _write_pr_comment(Path(output), findings)
         return int(blocked)
     except (OSError, zipfile.BadZipFile, ValidationError, json.JSONDecodeError, RuntimeError) as error:
         print(f"Unable to scan package source: {error}", file=sys.stderr)

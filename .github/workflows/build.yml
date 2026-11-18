@@ -28,6 +28,8 @@ jobs:
       contents: read
       pull-requests: read
     runs-on: ubuntu-latest
+    outputs:
+      semgrep_comment: ${{ steps.scan.outputs.comment }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -47,7 +49,7 @@ jobs:
             });
             const scanInputs = new Set([
               ".semgrep.yml", "scripts/scan_packages.py", "scripts/build_catalog.py",
-              ".github/workflows/build.yml", ".github/workflows/semgrep-pr-comment.yml",
+              ".github/workflows/build.yml",
             ]);
             const scanAll = files.some(file =>
               scanInputs.has(file.filename) || scanInputs.has(file.previous_filename));
@@ -60,31 +62,42 @@ jobs:
             core.setOutput("archives", JSON.stringify(archives));
       - name: Validate packages
         run: python scripts/build_catalog.py --check
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
       - name: Install Semgrep Community Edition
-        run: python -m pip install semgrep==1.185.0
+        if: steps.scan-scope.outputs.archives != '[]'
+        run: uv pip install --system semgrep==1.185.0
       - name: Scan package Python code
+        id: scan
         env:
           CHANGED_PACKAGE_ARCHIVES: ${{ steps.scan-scope.outputs.archives }}
-          SCAN_REPORT_PATH: ${{ runner.temp }}/semgrep-findings.json
         run: |
           $scanArgs = @()
-          if ($env:GITHUB_EVENT_NAME -eq 'pull_request') {
-            $scanArgs += @('--report-file', $env:SCAN_REPORT_PATH)
-            if ($env:CHANGED_PACKAGE_ARCHIVES) {
-              $scanArgs += @('--archives-json', $env:CHANGED_PACKAGE_ARCHIVES)
-            }
+          if ($env:CHANGED_PACKAGE_ARCHIVES) {
+            $scanArgs = @('--archives-json', $env:CHANGED_PACKAGE_ARCHIVES)
           }
           python scripts/scan_packages.py @scanArgs
-      - name: Upload Semgrep report for PR comment
-        if: always() && github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v7
-        with:
-          name: semgrep-findings-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/semgrep-findings.json
-          if-no-files-found: ignore
-          retention-days: 1
       - name: Test catalog builder
         run: python -m unittest discover -s tests -p "test_*.py"
+
+  dispatch-semgrep-comment:
+    needs: validate
+    if: >-
+      ${{ !cancelled() && github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository &&
+          github.actor != 'dependabot[bot]' && needs.validate.outputs.semgrep_comment != '' }}
+    permissions:
+      actions: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch Semgrep comment workflow
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMENT_INPUTS: ${{ needs.validate.outputs.semgrep_comment }}
+        run: |
+          $env:COMMENT_INPUTS | gh workflow run semgrep-pr-comment.yml --repo $env:GITHUB_REPOSITORY --json
 
   publish:
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
