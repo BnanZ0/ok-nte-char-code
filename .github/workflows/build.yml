@@ -23,6 +23,7 @@ defaults:
 
 jobs:
   validate:
+    if: ${{ !github.event.repository.fork }}
     permissions:
       contents: read
       pull-requests: read
